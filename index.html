@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#10231b">
+  <title>Bad Rally Cutter</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0b1511; --card:#14231c; --line:#294236; --ink:#f3f7f4; --muted:#a9b8b0; --lime:#c8ff63; --danger:#ff8d8d; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:radial-gradient(circle at top,#1b392b 0,#0b1511 42%); color:var(--ink); font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",sans-serif; min-height:100vh; }
+    main { width:min(920px,100%); margin:auto; padding:calc(24px + env(safe-area-inset-top)) 16px calc(40px + env(safe-area-inset-bottom)); }
+    header { margin-bottom:18px; }
+    h1 { font-size:clamp(26px,6vw,44px); margin:0 0 6px; letter-spacing:-.04em; }
+    h2 { font-size:20px; margin:0; }
+    p { color:var(--muted); margin:0; line-height:1.55; }
+    .card { background:color-mix(in srgb,var(--card) 94%,transparent); border:1px solid var(--line); border-radius:18px; padding:16px; margin-top:14px; box-shadow:0 16px 35px #0004; }
+    .picker { display:grid; gap:10px; text-align:center; padding:24px 16px; border:1px dashed #527461; border-radius:14px; }
+    input[type=file] { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
+    button,.file-button { appearance:none; border:0; border-radius:12px; padding:14px 18px; min-height:48px; font:inherit; font-weight:750; cursor:pointer; touch-action:manipulation; }
+    .file-button,.primary { background:var(--lime); color:#132010; }
+    .file-button { display:inline-flex; justify-content:center; align-items:center; justify-self:center; min-width:210px; }
+    button:disabled { opacity:.4; cursor:not-allowed; }
+    .secondary { background:#263a30; color:var(--ink); border:1px solid #385346; }
+    .danger { background:transparent; color:var(--danger); border:1px solid #744; }
+    video { display:block; width:100%; max-height:62vh; background:#000; border-radius:12px; margin-top:14px; }
+    .hidden { display:none !important; }
+    .meta,.status { margin-top:10px; font-size:14px; }
+    .controls { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:14px; }
+    .status { min-height:22px; color:var(--lime); font-weight:650; }
+    .section-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; }
+    .count { color:var(--muted); font-size:14px; }
+    ol { list-style:none; margin:0; padding:0; display:grid; gap:10px; }
+    li { display:grid; grid-template-columns:1fr auto; gap:10px; align-items:center; background:#0e1a15; padding:12px; border-radius:12px; border:1px solid var(--line); }
+    .range { font-variant-numeric:tabular-nums; font-weight:700; }
+    .duration { color:var(--muted); font-size:13px; margin-top:3px; }
+    .row-actions { display:flex; gap:8px; }
+    .row-actions button { padding:10px 12px; min-height:42px; }
+    .empty { color:var(--muted); text-align:center; padding:16px; border:1px dashed var(--line); border-radius:12px; }
+    footer { margin-top:16px; color:var(--muted); font-size:13px; text-align:center; }
+    @media (max-width:560px) { li { grid-template-columns:1fr; } .row-actions button { flex:1; } .row-actions { width:100%; } }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Bad Rally Cutter</h1>
+      <p>動画を見ながら、残したいラリー区間を2タップで記録します。</p>
+    </header>
+
+    <section class="card picker" aria-labelledby="pick-title">
+      <h2 id="pick-title">動画を選択</h2>
+      <p>動画は端末内だけで開き、サーバーへ送信しません。</p>
+      <label class="file-button" for="video-file">端末から動画を選ぶ</label>
+      <input id="video-file" type="file" accept="video/*">
+      <div id="file-name" class="meta" aria-live="polite">未選択</div>
+    </section>
+
+    <section id="editor" class="card hidden" aria-labelledby="editor-title">
+      <h2 id="editor-title">ラリー区間を登録</h2>
+      <video id="video" controls playsinline preload="metadata"></video>
+      <div class="controls">
+        <button id="start-button" class="primary" type="button">① ラリー開始</button>
+        <button id="end-button" class="secondary" type="button" disabled>② ラリー終了</button>
+      </div>
+      <div id="status" class="status" aria-live="polite">再生位置を合わせて「ラリー開始」</div>
+    </section>
+
+    <section id="list-card" class="card hidden" aria-labelledby="list-title">
+      <div class="section-head"><h2 id="list-title">登録した区間</h2><span id="count" class="count">0件</span></div>
+      <div id="empty" class="empty">まだ区間がありません</div>
+      <ol id="segments"></ol>
+    </section>
+    <footer>この最小版は区間の記録・確認用です。動画ファイルの書き出しはまだ行いません。</footer>
+  </main>
+
+  <script>
+    const fileInput = document.querySelector('#video-file');
+    const fileName = document.querySelector('#file-name');
+    const editor = document.querySelector('#editor');
+    const listCard = document.querySelector('#list-card');
+    const video = document.querySelector('#video');
+    const startButton = document.querySelector('#start-button');
+    const endButton = document.querySelector('#end-button');
+    const status = document.querySelector('#status');
+    const list = document.querySelector('#segments');
+    const empty = document.querySelector('#empty');
+    const count = document.querySelector('#count');
+
+    let objectUrl = null;
+    let pendingStart = null;
+    let segments = [];
+    let previewEnd = null;
+
+    function formatTime(seconds) {
+      if (!Number.isFinite(seconds)) return '00:00.0';
+      const minutes = Math.floor(seconds / 60);
+      const rest = seconds - minutes * 60;
+      return `${String(minutes).padStart(2, '0')}:${rest.toFixed(1).padStart(4, '0')}`;
+    }
+
+    function stopPreview() {
+      previewEnd = null;
+    }
+
+    function resetMarks() {
+      pendingStart = null;
+      startButton.disabled = false;
+      endButton.disabled = true;
+      status.textContent = '再生位置を合わせて「ラリー開始」';
+    }
+
+    function renderSegments() {
+      list.replaceChildren();
+      count.textContent = `${segments.length}件`;
+      empty.classList.toggle('hidden', segments.length > 0);
+
+      segments.forEach((segment, index) => {
+        const item = document.createElement('li');
+        const info = document.createElement('div');
+        info.innerHTML = `<div class="range">ラリー ${index + 1}　${formatTime(segment.start)} → ${formatTime(segment.end)}</div><div class="duration">長さ ${formatTime(segment.end - segment.start)}</div>`;
+        const actions = document.createElement('div');
+        actions.className = 'row-actions';
+        const preview = document.createElement('button');
+        preview.type = 'button';
+        preview.className = 'secondary';
+        preview.textContent = '確認再生';
+        preview.addEventListener('click', async () => {
+          video.currentTime = segment.start;
+          previewEnd = segment.end;
+          try { await video.play(); } catch (_) { status.textContent = '再生ボタンを押してください'; }
+        });
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'danger';
+        remove.textContent = '削除';
+        remove.setAttribute('aria-label', `ラリー ${index + 1} を削除`);
+        remove.addEventListener('click', () => {
+          segments.splice(index, 1);
+          stopPreview();
+          renderSegments();
+        });
+        actions.append(preview, remove);
+        item.append(info, actions);
+        list.append(item);
+      });
+    }
+
+    fileInput.addEventListener('change', () => {
+      const file = fileInput.files && fileInput.files[0];
+      if (!file) return;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      objectUrl = URL.createObjectURL(file);
+      video.src = objectUrl;
+      video.load();
+      fileName.textContent = file.name;
+      editor.classList.remove('hidden');
+      listCard.classList.remove('hidden');
+      segments = [];
+      stopPreview();
+      resetMarks();
+      renderSegments();
+    });
+
+    startButton.addEventListener('click', () => {
+      if (!Number.isFinite(video.duration)) { status.textContent = '動画の読み込みを待ってください'; return; }
+      stopPreview();
+      pendingStart = video.currentTime;
+      startButton.disabled = true;
+      endButton.disabled = false;
+      status.textContent = `開始 ${formatTime(pendingStart)} — 終了位置まで進めてください`;
+    });
+
+    endButton.addEventListener('click', () => {
+      const end = video.currentTime;
+      if (pendingStart === null) return;
+      if (end <= pendingStart) { status.textContent = '終了は開始より後の位置にしてください'; return; }
+      segments.push({ start: pendingStart, end });
+      segments.sort((a, b) => a.start - b.start);
+      renderSegments();
+      resetMarks();
+      status.textContent = '区間を登録しました';
+    });
+
+    video.addEventListener('timeupdate', () => {
+      if (previewEnd !== null && video.currentTime >= previewEnd) {
+        video.pause();
+        video.currentTime = previewEnd;
+        stopPreview();
+      }
+    });
+    video.addEventListener('seeking', () => {
+      if (previewEnd !== null && video.currentTime > previewEnd) stopPreview();
+    });
+    window.addEventListener('pagehide', () => { if (objectUrl) URL.revokeObjectURL(objectUrl); });
+  </script>
+</body>
+</html>
