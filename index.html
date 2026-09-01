@@ -58,9 +58,10 @@
 
     <section id="editor" class="card hidden" aria-labelledby="editor-title">
       <h2 id="editor-title">ラリー区間を登録</h2>
-      <video id="video" controls playsinline preload="metadata"></video>
+      <video id="video" controls playsinline webkit-playsinline preload="metadata"></video>
+      <div id="load-status" class="meta" role="status" aria-live="polite"></div>
       <div class="controls">
-        <button id="start-button" class="primary" type="button">① ラリー開始</button>
+        <button id="start-button" class="primary" type="button" disabled>① ラリー開始</button>
         <button id="end-button" class="secondary" type="button" disabled>② ラリー終了</button>
       </div>
       <div id="status" class="status" aria-live="polite">再生位置を合わせて「ラリー開始」</div>
@@ -80,6 +81,7 @@
     const editor = document.querySelector('#editor');
     const listCard = document.querySelector('#list-card');
     const video = document.querySelector('#video');
+    const loadStatus = document.querySelector('#load-status');
     const startButton = document.querySelector('#start-button');
     const endButton = document.querySelector('#end-button');
     const status = document.querySelector('#status');
@@ -91,6 +93,8 @@
     let pendingStart = null;
     let segments = [];
     let previewEnd = null;
+    let loadTimer = null;
+    let selectedFile = null;
 
     function formatTime(seconds) {
       if (!Number.isFinite(seconds)) return '00:00.0';
@@ -105,7 +109,7 @@
 
     function resetMarks() {
       pendingStart = null;
-      startButton.disabled = false;
+      startButton.disabled = !Number.isFinite(video.duration) || video.duration <= 0;
       endButton.disabled = true;
       status.textContent = '再生位置を合わせて「ラリー開始」';
     }
@@ -149,17 +153,50 @@
     fileInput.addEventListener('change', () => {
       const file = fileInput.files && fileInput.files[0];
       if (!file) return;
+      selectedFile = file;
+      clearTimeout(loadTimer);
       if (objectUrl) URL.revokeObjectURL(objectUrl);
+      video.pause();
+      video.removeAttribute('src');
+      video.load();
       objectUrl = URL.createObjectURL(file);
       video.src = objectUrl;
       video.load();
       fileName.textContent = file.name;
+      const megabytes = (file.size / 1024 / 1024).toFixed(1);
+      loadStatus.textContent = `動画を読み込み中…（${megabytes} MB）`;
       editor.classList.remove('hidden');
       listCard.classList.remove('hidden');
       segments = [];
       stopPreview();
       resetMarks();
       renderSegments();
+      loadTimer = setTimeout(() => {
+        if (!Number.isFinite(video.duration)) {
+          loadStatus.textContent = '読み込みに時間がかかっています。iCloud上の動画は、写真アプリで一度開いて端末へダウンロードしてから選び直してください。';
+          status.textContent = '動画の読み込み完了を待っています';
+        }
+      }, 10000);
+    });
+
+    video.addEventListener('loadedmetadata', () => {
+      clearTimeout(loadTimer);
+      startButton.disabled = false;
+      loadStatus.textContent = `読み込み完了　${formatTime(video.duration)}${selectedFile && selectedFile.type ? ` ／ ${selectedFile.type}` : ''}`;
+      status.textContent = '再生位置を合わせて「ラリー開始」';
+    });
+
+    video.addEventListener('error', () => {
+      clearTimeout(loadTimer);
+      startButton.disabled = true;
+      const messages = {
+        1: '動画の読み込みが中断されました。もう一度選び直してください。',
+        2: '動画ファイルを読み込めませんでした。端末へ保存してから選び直してください。',
+        3: 'この動画の映像形式をSafariで再生できません。H.264形式のMP4へ変換してください。',
+        4: 'この動画形式はSafariに対応していません。H.264形式のMP4を選んでください。'
+      };
+      loadStatus.textContent = messages[video.error && video.error.code] || '動画を読み込めませんでした。別の動画でお試しください。';
+      status.textContent = '動画を選び直してください';
     });
 
     startButton.addEventListener('click', () => {
